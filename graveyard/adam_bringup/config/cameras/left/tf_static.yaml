@@ -1,0 +1,12 @@
+# Static transform from base_link to oak_left_frame
+transform:
+  translation:
+    x: -0.06576136  # radius * cos(120°)
+    y: 0.15778083   # radius * sin(120°) 
+    z: 0.27459372
+  rotation:
+    roll: 0.0
+    pitch: 0.0
+    yaw: 2.0944  # 120 degrees in radians
+  parent_frame: "base_link"
+  child_frame: "oak_left_frame"

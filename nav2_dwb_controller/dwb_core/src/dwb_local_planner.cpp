@@ -61,8 +61,18 @@ namespace dwb_core
 
 DWBLocalPlanner::DWBLocalPlanner()
 : traj_gen_loader_("dwb_core", "dwb_core::TrajectoryGenerator"),
-  critic_loader_("dwb_core", "dwb_core::TrajectoryCritic")
+  traj_generator_(nullptr),
+  critic_loader_("dwb_core", "dwb_core::TrajectoryCritic"),
+  critics_(),
+  enable_degraded_control_(true),
+  degraded_scale_(0.5),
+  degraded_timeout_sec_(2.0),
+  last_valid_cmd_(),
+  last_valid_cmd_time_(),
+  last_cmd_mutex_()
 {
+  last_valid_cmd_.header.stamp.sec = 0;
+  last_valid_cmd_.header.stamp.nanosec = 0;
 }
 
 void DWBLocalPlanner::configure(
@@ -109,6 +119,17 @@ void DWBLocalPlanner::configure(
     node, dwb_plugin_name_ + ".short_circuit_trajectory_evaluation",
     rclcpp::ParameterValue(true));
 
+  // --- degrade-on-failure: params ---
+  declare_parameter_if_not_declared(
+    node, dwb_plugin_name_ + ".enable_degraded_control",
+    rclcpp::ParameterValue(false));
+  declare_parameter_if_not_declared(
+    node, dwb_plugin_name_ + ".degraded_scale",
+    rclcpp::ParameterValue(0.5));
+  declare_parameter_if_not_declared(
+    node, dwb_plugin_name_ + ".degraded_timeout_sec",
+    rclcpp::ParameterValue(2.0));
+
   std::string traj_generator_name;
 
   double transform_tolerance;
@@ -125,6 +146,11 @@ void DWBLocalPlanner::configure(
     dwb_plugin_name_ + ".short_circuit_trajectory_evaluation",
     short_circuit_trajectory_evaluation_);
   node->get_parameter(dwb_plugin_name_ + ".shorten_transformed_plan", shorten_transformed_plan_);
+
+  // --- degrade-on-failure: param reading ---
+  node->get_parameter(dwb_plugin_name_ + ".enable_degraded_control", enable_degraded_control_);
+  node->get_parameter(dwb_plugin_name_ + ".degraded_scale", degraded_scale_);
+  node->get_parameter(dwb_plugin_name_ + ".degraded_timeout_sec", degraded_timeout_sec_);
 
   pub_ = std::make_unique<DWBPublisher>(node, dwb_plugin_name_);
   pub_->on_configure();
@@ -280,6 +306,7 @@ DWBLocalPlanner::prepareGlobalPlan(
     goal_pose, transform_tolerance_);
 }
 
+// --- degrade-on-failure: main logic ---
 nav_2d_msgs::msg::Twist2DStamped
 DWBLocalPlanner::computeVelocityCommands(
   const nav_2d_msgs::msg::Pose2DStamped & pose,
@@ -323,6 +350,13 @@ DWBLocalPlanner::computeVelocityCommands(
     pub_->publishLocalPlan(pose.header, best.traj);
     pub_->publishCostGrid(costmap_ros_, critics_);
 
+    // --- degrade-on-failure: record last valid command ---
+    {
+      std::lock_guard<std::mutex> lk(last_cmd_mutex_);
+      last_valid_cmd_ = cmd_vel;
+      last_valid_cmd_time_ = clock_->now();
+    }
+
     return cmd_vel;
   } catch (const dwb_core::NoLegalTrajectoriesException & e) {
     nav_2d_msgs::msg::Twist2D empty_cmd;
@@ -332,12 +366,47 @@ DWBLocalPlanner::computeVelocityCommands(
       critic->debrief(empty_cmd);
     }
 
-    lock.unlock();
-
+    // publish diagnostics like before
     pub_->publishLocalPlan(pose.header, empty_traj);
     pub_->publishCostGrid(costmap_ros_, critics_);
 
-    throw;
+    // --- degrade-on-failure: main logic ---
+    if (enable_degraded_control_) {
+      std::lock_guard<std::mutex> lk(last_cmd_mutex_);
+      if (!last_valid_cmd_.header.stamp.sec && !last_valid_cmd_.header.stamp.nanosec) {
+        // no previous command recorded, fallback to throw
+        lock.unlock();
+        throw;
+      }
+      rclcpp::Time now = clock_->now();
+      rclcpp::Duration age = now - last_valid_cmd_time_;
+      if (age.seconds() <= degraded_timeout_sec_) {
+        // Build scaled command to return
+        nav_2d_msgs::msg::Twist2DStamped scaled_cmd = last_valid_cmd_;
+        scaled_cmd.velocity.x *= degraded_scale_;
+        scaled_cmd.velocity.y *= degraded_scale_;  // if applicable
+        scaled_cmd.velocity.theta *= degraded_scale_;
+
+        // debrief critics with scaled_cmd (optional but consistent)
+        for (TrajectoryCritic::Ptr & critic : critics_) {
+          critic->debrief(scaled_cmd.velocity);
+        }
+
+        RCLCPP_WARN(logger_, "Degraded control: returning last valid command scaled by %.2f", degraded_scale_);
+
+        lock.unlock();
+        // Return the scaled command (robot will 'creep' instead of stopping)
+        return scaled_cmd;
+      } else {
+        // last command too old -> throw for safety
+        lock.unlock();
+        throw;
+      }
+    } else {
+      lock.unlock();
+      // degraded not enabled -> preserve behavior
+      throw;
+    }
   }
 }
 
