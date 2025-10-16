@@ -50,11 +50,14 @@ bool PathLongerOnApproach::isRobotInGoalProximity(
 bool PathLongerOnApproach::isNewPathLonger(
   nav_msgs::msg::Path & new_path,
   nav_msgs::msg::Path & old_path,
-  double & length_factor)
+  double & length_factor,
+  double & abs_length)
 {
-  return nav2_util::geometry_utils::calculate_path_length(new_path, 0) >
-         length_factor * nav2_util::geometry_utils::calculate_path_length(
-    old_path, 0);
+  double new_len = nav2_util::geometry_utils::calculate_path_length(new_path, 0);
+  double old_len = nav2_util::geometry_utils::calculate_path_length(old_path, 0);
+  RCLCPP_INFO(node_->get_logger(), "New path length: %f, Old path length: %f", new_len, old_len);
+  return (new_len > length_factor * old_len) &&
+         ((new_len - old_len) > abs_length);
 }
 
 inline BT::NodeStatus PathLongerOnApproach::tick()
@@ -62,6 +65,7 @@ inline BT::NodeStatus PathLongerOnApproach::tick()
   getInput("path", new_path_);
   getInput("prox_len", prox_len_);
   getInput("length_factor", length_factor_);
+  getInput("abs_length", abs_length_);
 
   if (first_time_ == false) {
     if (old_path_.poses.empty() || new_path_.poses.empty() ||
@@ -75,8 +79,14 @@ inline BT::NodeStatus PathLongerOnApproach::tick()
 
   // Check if the path is updated and valid, compare the old and the new path length,
   // given the goal proximity and check if the new path is longer
+  RCLCPP_INFO(
+    node_->get_logger(), "Path updated: %s, In goal proximity: %s, New path longer: %s",
+    isPathUpdated(new_path_, old_path_) ? "true" : "false",
+    isRobotInGoalProximity(old_path_, prox_len_) ? "true" : "false",
+    isNewPathLonger(new_path_, old_path_, length_factor_, abs_length_) ? "true" : "false");
+    
   if (isPathUpdated(new_path_, old_path_) && isRobotInGoalProximity(old_path_, prox_len_) &&
-    isNewPathLonger(new_path_, old_path_, length_factor_) && !first_time_)
+    isNewPathLonger(new_path_, old_path_, length_factor_, abs_length_) && !first_time_)
   {
     const BT::NodeStatus child_state = child_node_->executeTick();
     switch (child_state) {

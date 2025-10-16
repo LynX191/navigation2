@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>adam_camera</name>
+  <version>0.0.0</version>
+  <description>Camera launch and composable pointcloud node setup for DepthAI</description>
+  <maintainer email="osamaeldebaa@gmail.com">emage</maintainer>
+  <license>MIT</license>
+
+  <!-- Dependencies required for running launch files -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>depthai_ros_driver</exec_depend>
+  <exec_depend>depth_image_proc</exec_depend>
+  <exec_depend>rclcpp_components</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

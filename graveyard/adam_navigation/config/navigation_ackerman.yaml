@@ -1,0 +1,299 @@
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    action_server_result_timeout: 900.0
+    navigators: ["navigate_to_pose", "navigate_through_poses"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+
+amcl:
+  ros__parameters:
+    min_particles: 500
+    max_particles: 2000
+    odom_model_type: "diff"          # Keep diff for compatibility
+    odom_alpha1: 0.01
+    odom_alpha2: 0.01
+    odom_alpha3: 0.01
+    odom_alpha4: 0.01
+    odom_alpha5: 0.005
+    laser_model_type: "likelihood_field"
+    laser_max_beams: 60
+    laser_max_range: 12.0
+    laser_min_range: 0.2
+    laser_likelihood_max_dist: 2.0
+    laser_sigma_hit: 0.2
+    laser_z_hit: 0.5
+    laser_z_short: 0.05
+    laser_z_max: 0.05
+    laser_z_rand: 0.4
+    update_min_d: 0.1
+    update_min_a: 0.1
+    resample_interval: 1
+    transform_tolerance: 0.01
+    recovery_alpha_slow: 0.0
+    recovery_alpha_fast: 0.0
+    initial_pose_x: 0.0
+    initial_pose_y: 0.0
+    initial_pose_a: 0.0
+    initial_cov_xx: 0.25
+    initial_cov_yy: 0.25
+    initial_cov_aa: 0.0685
+    gui_publish_rate: 10.0
+    save_pose_rate: 0.5
+    use_map_topic: true
+    first_map_only: false
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    map_frame_id: "map"
+    global_frame_id: "map"
+    scan_topic: "scan"
+    tf_broadcast: true
+    set_initial_pose: true
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 10.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 1.0
+    patience: 60.0                  # More patience for Ackermann
+    odom_topic: /odom
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+    
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.15  # Small requirement
+      movement_time_allowance: 45.0   # Lots of time for car-like motion
+    
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.25          # Consider reach with 0.2 meters gap
+      yaw_goal_tolerance: 0.5         # Consider reach with 0.5 radians gap
+      stateful: true
+    
+    #ACKERMANN STEERING CONTROLLER
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      
+      #ACKERMANN MOTION PARAMETERS
+      desired_linear_vel: 0.3        # Moderate car speed
+      base_desired_linear_vel: 0.3  
+      max_linear_accel: 0.8           # Car-like acceleration
+      max_linear_decel: 0.8
+      min_approach_linear_velocity: 0.05  # Always move forward like a car
+      
+      #ACKERMANN LOOKAHEAD - LONG FOR WIDE TURNS
+      lookahead_dist: 2.5             # LONG for wide car turns
+      min_lookahead_dist: 1.0         # Minimum for tight spaces
+      max_lookahead_dist: 4.0         # VERY LONG for highway-like motion
+      lookahead_time: 2.5             # LONG prediction for smooth curves
+      use_velocity_scaled_lookahead_dist: true
+      
+      #ACKERMANN STEERING CONSTRAINTS
+      use_rotate_to_heading: false    # Cars cannot rotate in place
+      max_angular_accel: 0.5          # Limited steering rate
+      max_angular_velocity_scaling: 1  # ⭐ VERY LIMITED like real car steering
+      
+      #ACKERMANN APPROACH BEHAVIOR
+      approach_velocity_scaling_dist: 0.3  # Early approach like parking
+      use_approach_vel_scaling: true
+      
+      #ACKERMANN VELOCITY REGULATION
+      use_regulated_linear_velocity_scaling: true   # Enable for smooth curves
+      use_cost_regulated_linear_velocity_scaling: false
+      regulated_linear_scaling_min_radius: 3.0     # ⭐ MINIMUM TURNING RADIUS (like car)
+      regulated_linear_scaling_min_speed: 0.15     # Always keep moving
+      curvature_lookahead_dist: 1.0          # Short for car-like motion
+      
+      #ACKERMANN PATH FOLLOWING
+      use_cusp_detection: false       # Cars don't make sharp direction changes
+      
+      #ACKERMANN COLLISION AVOIDANCE
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 4.0  # More time for wide turns
+      
+      #ACKERMANN MOTION CONSTRAINTS
+      allow_reversing: true          # Primarily forward motion
+      max_robot_pose_search_dist: 8.0
+      use_interpolation: true         # Smooth path interpolation
+      
+      #ACKERMANN TOLERANCES
+      transform_tolerance: 0.1
+      
+      #ACKERMANN COST SCALING
+      cost_scaling_dist: 2.0          # Long range planning
+      cost_scaling_gain: 0.3          # Gentle obstacle avoidance
+      inflation_cost_scaling_factor: 1.5
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 3.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 6                        # Large for Ackermann planning
+      height: 6
+      resolution: 0.1                 # Fine resolution for precise planning
+      robot_radius: 0.3               # Car-like footprint
+      plugins: ["obstacle_layer", "inflation_layer"]
+      
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        combination_method: 1
+        observation_sources: scan
+        
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 4.0      # Good range for car planning
+          obstacle_max_range: 3.5
+          inf_is_valid: false
+          clearing_threshold: 3
+          marking_threshold: 0
+      
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 0.5       # Moderate inflation for car safety
+        inflation_radius: 1.5         # Car safety margin
+        inflate_unknown: false
+        inflate_around_unknown: false
+      
+      always_send_full_costmap: True
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      robot_radius: 0.3
+      resolution: 0.05
+      track_unknown_space: false
+      plugins: ["static_layer", "inflation_layer"]
+      
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 0.5        # Reduce from 1.0 to make inflation less "dangerous"
+        inflation_radius: 1.5
+        inflate_unknown: false
+        inflate_around_unknown: false
+      
+      always_send_full_costmap: True
+
+#ACKERMANN-OPTIMIZED PLANNER
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 5.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"  # ⭐ BEST for Ackermann!
+      downsample_costmap: false
+      downsampling_factor: 1
+      tolerance: 0.25
+      allow_unknown: false
+      max_iterations: 1000000
+      max_planning_time: 10.0         # More time for complex Ackermann paths
+      motion_model_for_search: "DUBIN"  # ⭐ PERFECT for car-like motion
+      angle_quantization_bins: 72
+      analytic_expansion_ratio: 3.5
+      analytic_expansion_max_length: 3.0
+      minimum_turning_radius: 1.5     # ⭐ CAR TURNING RADIUS (adjust for your robot)
+      allow_primitive_interpolation: true
+      reverse_penalty: 2.0           # Discourage reversing
+      change_penalty: 1.0
+      non_straight_penalty: 1.2
+      cost_penalty: 2.0
+      retrospective_penalty: 0.015
+      lookup_table_size: 20.0
+      cache_obstacle_heuristic: false
+      debug_visualizations: false
+      use_quadratic_cost_penalty: false
+      downsample_obstacle_heuristic: true
+
+behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 5.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    
+    #ACKERMANN BEHAVIORS
+    spin:
+      plugin: "nav2_behaviors/Spin"
+      spin_dist: 0            # Full rotation allowed
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+      backup_dist: 0.15               # Short backup like a car
+      backup_speed: 0.05
+      time_allowance: 15.0         # ⭐ CHANGE: More time for backup
+      simulate_ahead_time: 4.0     
+    
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+      command_x_vel: 0.25
+      command_y_vel: 0.0
+      max_rotational_vel: 0.25
+    
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    
+    assisted_teleop:
+      plugin: "nav2_behaviors/AssistedTeleop"
+      projection_time: 3.0
+      simulation_time_step: 0.1
+      enabled: true
+    
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_link
+    transform_tolerance: 0.1
+    simulate_ahead_time: 3.0
+
+#ACKERMANN VELOCITY CONSTRAINTS
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 15.0
+    scale_velocities: true
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.3, 0.0, 0.3]    # ✅ CORRECT - Full rotation capability
+    min_velocity: [-0.3, 0.0, -0.3]  # ✅ CORRECT - Full reverse rotation
+    max_accel: [1.5, 0.0, 1.5]
+    max_decel: [-1.5, 0.0, -1.5]
+    odom_topic: /odom
+    odom_duration: 0.1
+    deadband_velocity: [0.01, 0.0, 0.05]  # ⭐ KEY: Higher angular deadband
+    velocity_timeout: 1.5
+
+waypoint_follower:
+  ros__parameters:
+    loop_rate: 8
+    stop_on_failure: false
+    action_server_result_timeout: 900.0
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: True
+      waypoint_pause_duration: 1

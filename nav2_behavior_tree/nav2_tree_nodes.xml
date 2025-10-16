@@ -291,6 +291,17 @@
       <input_port name="path">Planned Path</input_port>
       <input_port name="prox_len">Proximity length (m) for the path to be longer on approach</input_port>
       <input_port name="length_factor">Length multiplication factor to check if the path is significantly longer </input_port>
+      <input_port name="abs_length">Absolute length (m) the new path must exceed the old path by</input_port>
+    </Decorator>
+
+    <Decorator ID="PathLengthChecker">
+      <input_port name="path">Planned Path</input_port>
+      <input_port name="prox_len">Proximity length (m) for the path to be longer on approach</input_port>
+      <input_port name="length_factor">Length multiplication factor to check if the path is significantly longer</input_port>
+      <input_port name="abs_length">Absolute length (m) the new path must exceed the old path by</input_port>
+      <input_port name="wait_timeout">Maximum time (seconds) to wait for a longer path before giving up</input_port>
+      <input_port name="check_frequency">Frequency (Hz) to check for path updates while waiting</input_port>
+      <input_port name="enable_waiting">Enable waiting mode - if false, behaves like PathLongerOnApproach</input_port>
     </Decorator>
 
     <Decorator ID="GoalUpdatedController">

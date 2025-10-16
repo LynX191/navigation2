@@ -38,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <mutex>
 
 #include "nav2_core/controller.hpp"
 #include "nav2_core/goal_checker.hpp"
@@ -233,6 +234,14 @@ protected:
 
   pluginlib::ClassLoader<TrajectoryCritic> critic_loader_;
   std::vector<TrajectoryCritic::Ptr> critics_;
+
+  // --- degrade-on-failure: private state members ---
+  bool enable_degraded_control_ = true;
+  double degraded_scale_ = 0.5;
+  double degraded_timeout_sec_ = 2.0;
+  nav_2d_msgs::msg::Twist2DStamped last_valid_cmd_;
+  rclcpp::Time last_valid_cmd_time_;
+  std::mutex last_cmd_mutex_;
 
   std::string dwb_plugin_name_;
 

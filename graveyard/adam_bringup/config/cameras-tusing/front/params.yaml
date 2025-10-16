@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    camera:
+      i_mx_id: 14442C1091D3DDD600  # Front Camera
+      i_enable_imu: true
+      i_enable_ir: true
+      i_nn_type: none
+      i_pipeline_type: RGBD
+      i_laser_dot_brightness: 1100
+      # i_usb_speed: SUPER_PLUS
+
+    rgb:
+      i_fps: 30.0
+    
+    left:
+      i_fps: 30.0
+
+    right:
+      i_fps: 30.0

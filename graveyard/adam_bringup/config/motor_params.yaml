@@ -1,0 +1,10 @@
+/**:  # Namespace
+  triorb_robot_node:
+    ros__parameters:
+      robot_port: "/dev/triorb_robot"
+      acc: 500
+      dec: 500
+      std_vel: 0.25
+      std_rot: 0.5
+      torque: 500
+      cmd_vel_timeout: 1.0

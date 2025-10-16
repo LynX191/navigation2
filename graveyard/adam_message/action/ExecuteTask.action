@@ -1,0 +1,14 @@
+# Goal
+string step
+string value  
+string station
+---
+# Result
+bool success
+string message
+float64 duration
+---
+# Feedback
+int32 progress_percent
+string current_status
+float64 elapsed_time

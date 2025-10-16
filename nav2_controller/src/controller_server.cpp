@@ -394,6 +394,7 @@ void ControllerServer::computeControl()
         RCLCPP_INFO(get_logger(), "Goal was canceled. Stopping the robot.");
         action_server_->terminate_all();
         publishZeroVelocity();
+        // sleep(10);
         return;
       }
 
@@ -488,14 +489,14 @@ void ControllerServer::computeAndPublishVelocity()
   } catch (nav2_core::PlannerException & e) {
     if (failure_tolerance_ > 0 || failure_tolerance_ == -1.0) {
       RCLCPP_WARN(this->get_logger(), "%s", e.what());
-      cmd_vel_2d.twist.angular.x = 0;
-      cmd_vel_2d.twist.angular.y = 0;
-      cmd_vel_2d.twist.angular.z = 0;
-      cmd_vel_2d.twist.linear.x = 0;
-      cmd_vel_2d.twist.linear.y = 0;
-      cmd_vel_2d.twist.linear.z = 0;
-      cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
-      cmd_vel_2d.header.stamp = now();
+      // cmd_vel_2d.twist.angular.x = 0;
+      // cmd_vel_2d.twist.angular.y = 0;
+      // cmd_vel_2d.twist.angular.z = 0;
+      // cmd_vel_2d.twist.linear.x = 0;
+      // cmd_vel_2d.twist.linear.y = 0;
+      // cmd_vel_2d.twist.linear.z = 0;
+      // cmd_vel_2d.header.frame_id = costmap_ros_->getBaseFrameID();
+      // cmd_vel_2d.header.stamp = now();
       if ((now() - last_valid_cmd_time_).seconds() > failure_tolerance_ &&
         failure_tolerance_ != -1.0)
       {

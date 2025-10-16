@@ -57,6 +57,9 @@ public:
       BT::InputPort<double>(
         "length_factor", 2.0,
         "Length multiplication factor to check if the path is significantly longer"),
+      BT::InputPort<double>(
+        "abs_length", 2.0,
+        "Absolute length (m) the new path must exceed the old path by"),
     };
   }
 
@@ -92,18 +95,21 @@ private:
    * @param new_path new path to the goal
    * @param old_path current path to the goal
    * @param length_factor multipler for path length check
+   * @param abs_length absolute length for path length check
    * @return whether the new path is longer
    */
   bool isNewPathLonger(
     nav_msgs::msg::Path & new_path,
     nav_msgs::msg::Path & old_path,
-    double & length_factor);
+    double & length_factor,
+    double & abs_length);
 
 private:
   nav_msgs::msg::Path new_path_;
   nav_msgs::msg::Path old_path_;
   double prox_len_ = std::numeric_limits<double>::max();
   double length_factor_ = std::numeric_limits<double>::max();
+  double abs_length_ = std::numeric_limits<double>::max();
   rclcpp::Node::SharedPtr node_;
   bool first_time_ = true;
 };
