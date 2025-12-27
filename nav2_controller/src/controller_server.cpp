@@ -471,9 +471,9 @@ void ControllerServer::computeAndPublishVelocity()
     throw nav2_core::PlannerException("Failed to obtain robot pose");
   }
 
-  if (!progress_checker_->check(pose)) {
-    throw nav2_core::PlannerException("Failed to make progress");
-  }
+  // if (!progress_checker_->check(pose)) {
+  //   throw nav2_core::PlannerException("Failed to make progress");
+  // }
 
   nav_2d_msgs::msg::Twist2D twist = getThresholdedTwist(odom_sub_->getTwist());
 

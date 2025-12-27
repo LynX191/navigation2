@@ -55,9 +55,11 @@ bool PathLongerOnApproach::isNewPathLonger(
 {
   double new_len = nav2_util::geometry_utils::calculate_path_length(new_path, 0);
   double old_len = nav2_util::geometry_utils::calculate_path_length(old_path, 0);
-  RCLCPP_INFO(node_->get_logger(), "New path length: %f, Old path length: %f", new_len, old_len);
-  return (new_len > length_factor * old_len) &&
-         ((new_len - old_len) > abs_length);
+  if (new_len > length_factor * old_len && (new_len - old_len) > abs_length) {
+    RCLCPP_INFO(node_->get_logger(), "New path length: %f, Old path length: %f", new_len, old_len);
+    return true;
+  }
+  return false;
 }
 
 inline BT::NodeStatus PathLongerOnApproach::tick()
@@ -79,11 +81,11 @@ inline BT::NodeStatus PathLongerOnApproach::tick()
 
   // Check if the path is updated and valid, compare the old and the new path length,
   // given the goal proximity and check if the new path is longer
-  RCLCPP_INFO(
-    node_->get_logger(), "Path updated: %s, In goal proximity: %s, New path longer: %s",
-    isPathUpdated(new_path_, old_path_) ? "true" : "false",
-    isRobotInGoalProximity(old_path_, prox_len_) ? "true" : "false",
-    isNewPathLonger(new_path_, old_path_, length_factor_, abs_length_) ? "true" : "false");
+  if(isNewPathLonger(new_path_, old_path_, length_factor_, abs_length_))
+    RCLCPP_INFO(
+      node_->get_logger(), "Path updated: %s, In goal proximity: %s, New path longer: true",
+      isPathUpdated(new_path_, old_path_) ? "true" : "false",
+      isRobotInGoalProximity(old_path_, prox_len_) ? "true" : "false");
     
   if (isPathUpdated(new_path_, old_path_) && isRobotInGoalProximity(old_path_, prox_len_) &&
     isNewPathLonger(new_path_, old_path_, length_factor_, abs_length_) && !first_time_)

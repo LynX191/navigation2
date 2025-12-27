@@ -183,11 +183,11 @@ void ObstacleLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "raytrace_max_range", raytrace_max_range);
 
 
-    RCLCPP_DEBUG(
-      logger_,
-      "Creating an observation buffer for source %s, topic %s, frame %s",
-      source.c_str(), topic.c_str(),
-      sensor_frame.c_str());
+    // RCLCPP_DEBUG(
+    //   logger_,
+    //   "Creating an observation buffer for source %s, topic %s, frame %s",
+    //   source.c_str(), topic.c_str(),
+    //   sensor_frame.c_str());
 
     // create an observation buffer
     observation_buffers_.push_back(
@@ -211,12 +211,12 @@ void ObstacleLayer::onInitialize()
       clearing_buffers_.push_back(observation_buffers_.back());
     }
 
-    RCLCPP_DEBUG(
-      logger_,
-      "Created an observation buffer for source %s, topic %s, global frame: %s, "
-      "expected update rate: %.2f, observation persistence: %.2f",
-      source.c_str(), topic.c_str(),
-      global_frame_.c_str(), expected_update_rate, observation_keep_time);
+    // RCLCPP_DEBUG(
+    //   logger_,
+    //   "Created an observation buffer for source %s, topic %s, global frame: %s, "
+    //   "expected update rate: %.2f, observation persistence: %.2f",
+    //   source.c_str(), topic.c_str(),
+    //   global_frame_.c_str(), expected_update_rate, observation_keep_time);
 
     rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
     custom_qos_profile.depth = 50;
@@ -462,13 +462,13 @@ ObstacleLayer::updateBounds(
 
       // if the obstacle is too low, we won't add it
       if (pz < min_obstacle_height_) {
-        RCLCPP_DEBUG(logger_, "The point is too low");
+        // RCLCPP_DEBUG(logger_, "The point is too low");
         continue;
       }
 
       // if the obstacle is too high or too far away from the robot we won't add it
       if (pz > max_obstacle_height_) {
-        RCLCPP_DEBUG(logger_, "The point is too high");
+        // RCLCPP_DEBUG(logger_, "The point is too high");
         continue;
       }
 
@@ -480,20 +480,20 @@ ObstacleLayer::updateBounds(
 
       // if the point is far enough away... we won't consider it
       if (sq_dist >= sq_obstacle_max_range) {
-        RCLCPP_DEBUG(logger_, "The point is too far away");
+        // RCLCPP_DEBUG(logger_, "The point is too far away");
         continue;
       }
 
       // if the point is too close, do not conisder it
       if (sq_dist < sq_obstacle_min_range) {
-        RCLCPP_DEBUG(logger_, "The point is too close");
+        // RCLCPP_DEBUG(logger_, "The point is too close");
         continue;
       }
 
       // now we need to compute the map coordinates for the observation
       unsigned int mx, my;
       if (!worldToMap(px, py, mx, my)) {
-        RCLCPP_DEBUG(logger_, "Computing map coords failed");
+        // RCLCPP_DEBUG(logger_, "Computing map coords failed");
         continue;
       }
 
