@@ -6,6 +6,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(laser_geometry REQUIRED)
 find_package(map_msgs REQUIRED)
 find_package(message_filters REQUIRED)
+find_package(vision_msgs REQUIRED)
 find_package(nav2_common REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util)
@@ -74,6 +75,7 @@ set(dependencies
   tf2_sensor_msgs
   visualization_msgs
   angles
+  vision_msgs
 )
 
 ament_target_dependencies(nav2_costmap_2d_core
@@ -89,6 +91,8 @@ add_library(layers SHARED
   plugins/voxel_layer.cpp
   plugins/range_sensor_layer.cpp
   plugins/denoise_layer.cpp
+  plugins/semantic_segmentation_layer.cpp
+  plugins/segmentation_buffer.cpp
 )
 add_library(${PROJECT_NAME}::layers ALIAS layers)
 ament_target_dependencies(layers
@@ -96,6 +100,7 @@ ament_target_dependencies(layers
 )
 target_link_libraries(layers
   ${PROJECT_NAME}::nav2_costmap_2d_core
+  ${vision_msgs_TARGETS}
 )
 
 add_library(filters SHARED
