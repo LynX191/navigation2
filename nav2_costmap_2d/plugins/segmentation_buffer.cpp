@@ -200,7 +200,7 @@ void SegmentationBuffer::bufferSegmentation(
     }
 
     // emplace the best observations in the mask into the tile map
-    temporal_tile_map_->lock();
+    std::unique_lock<std::recursive_mutex> tile_lock(temporal_tile_map_->getMutex());
     temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
     for (auto& idx : best_observations_idxs)
     {
@@ -218,7 +218,6 @@ void SegmentationBuffer::bufferSegmentation(
                       buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
       }
     }
-    temporal_tile_map_->unlock();
 
     if(visualize_tile_map_)
     {

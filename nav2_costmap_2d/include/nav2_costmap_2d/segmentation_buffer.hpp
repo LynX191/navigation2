@@ -378,6 +378,7 @@ class SegmentationTileMap {
          * @brief Unlocks the map.
          */
         inline void unlock() { lock_.unlock(); }
+        inline std::recursive_mutex& getMutex() { return lock_; }
 
         /**
          * @brief Returns the number of elements in the map.
@@ -726,6 +727,7 @@ class SegmentationBuffer
      * @brief  Lock the segmentation buffer
      */
     inline void unlock() { lock_.unlock(); }
+    inline std::recursive_mutex& getMutex() { return lock_; }
 
     /**
      * @brief Reset last updated timestamp
