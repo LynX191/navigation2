@@ -27,10 +27,10 @@
  *  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
  *  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
  *  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- *  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- *  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- *  POSSIBILITY OF SUCH DAMAGE.
+ *  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+ *  STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ *  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ *  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * Authors: Pedro Gonzalez (pedro@robot.com)
  *          Johan Solarte (jsolarte@robot.com)
@@ -38,7 +38,7 @@
 
 #ifndef SEMANTIC_SEGMENTATION_LAYER__SEGMENTATION_BUFFER_HPP_
 #define SEMANTIC_SEGMENTATION_LAYER__SEGMENTATION_BUFFER_HPP_
- 
+
 #include <deque>
 #include <list>
 #include <string>
@@ -54,752 +54,547 @@
 #include "vision_msgs/msg/label_info.hpp"
 
 /**
- * @brief Represents the parameters associated with the cost calculation for a given class
+ * @brief Represents the parameters associated with the cost calculation
+ *        for a given class.
  */
 struct CostHeuristicParams
 {
-    uint8_t base_cost, max_cost, mark_confidence;
-    int samples_to_max_cost;
-    bool dominant_priority;
+  uint8_t base_cost, max_cost, mark_confidence;
+  int     samples_to_max_cost;
+  bool    dominant_priority;
 };
 
 /**
- * @brief Represents a 2D grid index with equality comparison. Supports negative indexes
+ * @brief Represents a 2D grid index with equality comparison.
+ *        Supports negative indexes.
  */
 struct TileIndex {
-    int x, y;
-
-    bool operator==(const TileIndex& other) const {
-        return x == other.x && y == other.y;
-    }
+  int x, y;
+  bool operator==(const TileIndex& other) const {
+    return x == other.x && y == other.y;
+  }
 };
 
 namespace std {
-    /**
-     * @brief Custom hash function for TileIndex to enable its use as a key in unordered_map.
-     */
-    template<>
-    struct hash<TileIndex> {
-        size_t operator()(const TileIndex& coord) const {
-            // Compute individual hash values for two integers
-            // and combine them using bitwise XOR
-            // and bit shifting:
-            return std::hash<int>()(coord.x) ^ (std::hash<int>()(coord.y) << 1);
-        }
-    };
-}
-
+/**
+ * @brief Custom hash for TileIndex to enable use as unordered_map key.
+ */
+template<>
+struct hash<TileIndex> {
+  size_t operator()(const TileIndex& coord) const {
+    return std::hash<int>()(coord.x) ^ (std::hash<int>()(coord.y) << 1);
+  }
+};
+}  // namespace std
 
 /**
  * @brief Represents the world coordinates of a tile.
  */
-struct TileWorldXY
-{
-    double x, y;
-};
+struct TileWorldXY { double x, y; };
 
 /**
- * @brief Encapsulates the observation data for a tile, including class ID, cost, confidence, and timestamp.
+ * @brief Encapsulates a single observation for a tile.
  */
 struct TileObservation {
-    using UniquePtr = std::unique_ptr<TileObservation>;
-
-    uint8_t class_id;
-    float confidence;
-    double timestamp;
+  using UniquePtr = std::unique_ptr<TileObservation>;
+  uint8_t class_id;
+  float   confidence;
+  double  timestamp;
 };
 
 /**
- * @brief Manages temporal observations with a decay mechanism, maintaining a sum of confidences.
- * Wraps multiple std::deque objects to store observations per class ID, allowing for efficient insertion and removal.
- * Uses class ID -1 as a sentinel value to indicate no dominant class exists.
+ * @brief Manages temporal observations with a decay mechanism.
+ *
+ * Wraps per-class deques and tracks the dominant class (most samples).
+ * Sentinel value -1 means no dominant class exists.
  */
 class TemporalObservationQueue
 {
-   private:
-    std::unordered_map<uint8_t, std::deque<TileObservation>> class_queues_;
-    std::unordered_map<uint8_t, float> class_confidence_sums_;
-    int dominant_class_id_ = -1;
-    size_t dominant_class_size_ = 0;
-    double decay_time_;
+public:
+  TemporalObservationQueue() {}
 
-   public:
-    TemporalObservationQueue() {}
+  /**
+   * @brief Add an observation; updates dominant-class bookkeeping.
+   * @param tile_obs          The observation to add.
+   * @param dominant_priority When true this class immediately becomes dominant.
+   */
+  void push(TileObservation tile_obs, bool dominant_priority = false)
+  {
+    uint8_t class_id = tile_obs.class_id;
+    auto& queue = class_queues_[class_id];
+    queue.push_back(tile_obs);
+    class_confidence_sums_[class_id] += tile_obs.confidence;
 
-    /**
-     * @brief Adds an observation to the appropriate class queue, manages dominant class tracking.
-     * @param tile_obs The observation to add.
-     * @param dominant_priority Whether this class should take immediate dominance when observed.
-     */
-    void push(TileObservation tile_obs, bool dominant_priority = false)
-    {
-        uint8_t class_id = tile_obs.class_id;
-        
-        // Add observation to the appropriate class queue
-        auto& queue = class_queues_[class_id];
-        queue.push_back(tile_obs);
-        
-        // Update confidence sum for this class
-        class_confidence_sums_[class_id] += tile_obs.confidence;
-        
-        // Check if this class should become dominant
-        size_t current_class_size = queue.size();
-        bool should_become_dominant = false;
-        
-        if (dominant_priority) {
-            should_become_dominant = true;
+    size_t current_class_size = queue.size();
+    bool should_become_dominant =
+      dominant_priority || (current_class_size > dominant_class_size_);
+
+    if (should_become_dominant) {
+      if (dominant_class_id_ != -1 && dominant_class_id_ != class_id) {
+        clearQueuesExcept(class_id);
+      }
+      setDominant(class_id, current_class_size);
+    }
+  }
+
+  bool   empty() const { return dominant_class_id_ == -1; }
+  size_t size()  const { return dominant_class_size_; }
+
+  void setDecayTime(float decay_time) { decay_time_ = decay_time; }
+
+  float getConfidenceSum() const
+  {
+    if (dominant_class_id_ != -1) {
+      auto it = class_confidence_sums_.find(dominant_class_id_);
+      return (it != class_confidence_sums_.end()) ? it->second : 0.0f;
+    }
+    return 0.0f;
+  }
+
+  int getClassId() const { return dominant_class_id_; }
+
+  std::deque<TileObservation> getQueue()
+  {
+    if (dominant_class_id_ != -1) {
+      auto it = class_queues_.find(dominant_class_id_);
+      return (it != class_queues_.end())
+               ? it->second
+               : std::deque<TileObservation>();
+    }
+    return std::deque<TileObservation>();
+  }
+
+  /**
+   * @brief Remove observations older than decay_time_ from all queues.
+   * @param current_time Current time in seconds.
+   */
+  void purgeOld(double current_time)
+  {
+    bool dominant_removed = false;
+    for (auto it = class_queues_.begin(); it != class_queues_.end(); ) {
+      auto&         queue    = it->second;
+      const uint8_t class_id = it->first;
+
+      while (!queue.empty()) {
+        if (current_time - queue.front().timestamp > decay_time_) {
+          class_confidence_sums_[class_id] -= queue.front().confidence;
+          queue.pop_front();
         } else {
-            //logic for non-dominant_priority classes: only compete by size
-            should_become_dominant = (current_class_size > dominant_class_size_);
+          break;
         }
-        
-        if (should_become_dominant)
-        {
-            // New dominant class - purge all other classes
-            if (dominant_class_id_ != -1 && dominant_class_id_ != class_id)
-            {
-                clearQueuesExcept(class_id);
-            }
-            
-            // Update dominance
-            setDominant(class_id, current_class_size);
-        }
+      }
+
+      if (queue.empty()) {
+        if (class_id == static_cast<uint8_t>(dominant_class_id_))
+          dominant_removed = true;
+        class_confidence_sums_.erase(class_id);
+        it = class_queues_.erase(it);
+      } else {
+        ++it;
+      }
     }
 
-    /**
-     * @brief Checks if the dominant class queue is empty.
-     * @return True if empty, false otherwise.
-     */
-    bool empty() const { return dominant_class_id_ == -1; }
-
-    /**
-     * @brief Gets the size of the dominant class queue.
-     * @return The number of observations in the dominant class queue.
-     */
-    size_t size() const { return dominant_class_size_; }
-
-    /**
-     * @brief Sets the decay time for observations.
-     * @param decay_time The decay time in seconds.
-     */
-    void setDecayTime(float decay_time) { decay_time_ = decay_time; }
-
-    /**
-     * @brief Gets the current sum of confidence values of the dominant class.
-     * @return The sum of confidences for the dominant class.
-     */
-    float getConfidenceSum() const 
-    { 
-        if (dominant_class_id_ != -1)
-        {
-            auto it = class_confidence_sums_.find(dominant_class_id_);
-            return (it != class_confidence_sums_.end()) ? it->second : 0.0f;
-        }
-        return 0.0f;
+    if (dominant_removed) {
+      recomputeDominant();
+    } else if (dominant_class_id_ != -1) {
+      auto it = class_queues_.find(dominant_class_id_);
+      if (it != class_queues_.end())
+        setDominant(dominant_class_id_, it->second.size());
+      else
+        resetDominant();
     }
-
-    /**
-     * @brief Gets the class ID of the dominant class (most samples).
-     * @return The class ID, or -1 if no observations exist (-1 is used as sentinel value).
-     */
-    int getClassId() const { return dominant_class_id_; }
-
-    /**
-     * @brief Returns a copy of the dominant class queue. Will have overhead
-     * due to the copy operation but avoids race conditions since
-     * the object in the class is not made editable by others
-     * @return The dominant class queue, or empty deque if no dominant class.
-     */
-    std::deque<TileObservation> getQueue() 
-    { 
-        if (dominant_class_id_ != -1)
-        {
-            auto it = class_queues_.find(dominant_class_id_);
-            return (it != class_queues_.end()) ? it->second : std::deque<TileObservation>();
-        }
-        return std::deque<TileObservation>();
-    }
-
-    /**
-     * @brief Removes observations older than the decay time from all class queues.
-     * @param current_time The current time for comparison.
-     */
-    void purgeOld(double current_time)
-    {
-        // Iterate through all class queues and remove time-expired observations.
-        // While doing so, maintain the running confidence sums and remove classes
-        // whose queues become empty to preserve the invariant: if a class exists
-        // in class_queues_, its queue size is >= 1.
-        bool dominant_removed = false;
-
-        for (auto it = class_queues_.begin(); it != class_queues_.end(); )
-        {
-            auto& queue = it->second;
-            const uint8_t class_id = it->first;
-        
-            // Pop observations older than decay_time_ from the front (oldest first),
-            // updating the confidence sum accordingly.
-            while (!queue.empty())
-            {
-                double age = current_time - queue.front().timestamp;
-                if (age > decay_time_)
-                {
-                    class_confidence_sums_[class_id] -= queue.front().confidence;
-                    queue.pop_front();
-                }
-                else
-                {
-                    break;
-                }
-            }
-        
-            // If the queue ended up empty, erase the class entry entirely to avoid
-            // keeping "zombie" keys and to keep class_queues_ and class_confidence_sums_
-            // in sync. Track if the dominant class was removed to recompute dominance later.
-            if (queue.empty())
-            {
-                if (class_id == dominant_class_id_) dominant_removed = true;
-                class_confidence_sums_.erase(class_id);
-                it = class_queues_.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
-        
-        // Update dominant class bookkeeping:
-        // - If the dominant class was removed, scan to find the new dominant.
-        // - Otherwise, just refresh the dominant_class_size_ if it still exists;
-        //   if not found (edge case), reset dominance.
-        if (dominant_removed) {
-            recomputeDominant();
-        } else if (dominant_class_id_ != -1) {
-            auto it = class_queues_.find(dominant_class_id_);
-            if (it != class_queues_.end()) setDominant(dominant_class_id_, it->second.size());
-            else resetDominant();
-        }
-    }
+  }
 
 private:
-    /**
-     * @brief Removes all class queues and confidence sums except the specified class.
-     * @param keep_class_id The class ID to preserve.
-     */
-    void clearQueuesExcept(uint8_t keep_class_id)
-    {
-        for (auto it = class_queues_.begin(); it != class_queues_.end();)
-        {
-            if (it->first != keep_class_id)
-            {
-                class_confidence_sums_.erase(it->first);
-                it = class_queues_.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
+  void clearQueuesExcept(uint8_t keep_class_id)
+  {
+    for (auto it = class_queues_.begin(); it != class_queues_.end(); ) {
+      if (it->first != keep_class_id) {
+        class_confidence_sums_.erase(it->first);
+        it = class_queues_.erase(it);
+      } else {
+        ++it;
+      }
     }
+  }
 
-    /**
-     * @brief Recomputes dominant_class_id_ and dominant_class_size_ by scanning class_queues_.
-     */
-    void recomputeDominant()
-    {
-        resetDominant();
-        for (const auto& pair : class_queues_)
-        {
-            if (pair.second.size() > dominant_class_size_)
-            {
-                setDominant(pair.first, pair.second.size());
-            }
-        }
+  void recomputeDominant()
+  {
+    resetDominant();
+    for (const auto& pair : class_queues_) {
+      if (pair.second.size() > dominant_class_size_)
+        setDominant(pair.first, pair.second.size());
     }
+  }
 
-    /**
-     * @brief Resets the dominant class state to none.
-     */
-    void resetDominant()
-    {
-        dominant_class_id_ = -1;
-        dominant_class_size_ = 0;
-    }
+  void resetDominant() { dominant_class_id_ = -1; dominant_class_size_ = 0; }
 
-    /**
-     * @brief Sets the dominant class and its current size.
-     */
-    void setDominant(uint8_t class_id, size_t size)
-    {
-        dominant_class_id_ = class_id;
-        dominant_class_size_ = size;
-    }
+  void setDominant(uint8_t class_id, size_t size)
+  {
+    dominant_class_id_   = class_id;
+    dominant_class_size_ = size;
+  }
+
+  std::unordered_map<uint8_t, std::deque<TileObservation>> class_queues_;
+  std::unordered_map<uint8_t, float>                        class_confidence_sums_;
+  int    dominant_class_id_   = -1;
+  size_t dominant_class_size_ = 0;
+  double decay_time_          = 0.0;
 };
 
 /**
- * @brief Manages a map of tile observations, allowing for spatial and temporal querying.
- * Utilizes an unordered_map to efficiently index observations by tile and supports locking for thread safety.
+ * @brief Manages a map of tile observations indexed by TileIndex.
+ *        Has its own recursive_mutex for thread safety.
  */
-class SegmentationTileMap {
-    private:
-        std::unordered_map<TileIndex, TemporalObservationQueue> tile_map_;
-        float resolution_;
-        float decay_time_;
-        std::recursive_mutex lock_;
+class SegmentationTileMap
+{
+public:
+  using SharedPtr     = std::shared_ptr<SegmentationTileMap>;
+  using Iterator      = std::unordered_map<TileIndex, TemporalObservationQueue>::iterator;
+  using ConstIterator = std::unordered_map<TileIndex, TemporalObservationQueue>::const_iterator;
 
+  SegmentationTileMap(float resolution, float decay_time)
+  : resolution_(resolution), decay_time_(decay_time)
+  {
+    tile_map_.reserve(1e4);
+  }
+  SegmentationTileMap() {}
 
-    public:
-        using SharedPtr = std::shared_ptr<SegmentationTileMap>;
+  Iterator      begin()       { return tile_map_.begin(); }
+  ConstIterator begin() const { return tile_map_.begin(); }
+  Iterator      end()         { return tile_map_.end(); }
+  ConstIterator end()   const { return tile_map_.end(); }
 
-        // Define iterator types
-        using Iterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::iterator;
-        using ConstIterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::const_iterator;
+  inline void lock()   { lock_.lock(); }
+  inline void unlock() { lock_.unlock(); }
+  inline std::recursive_mutex& getMutex() { return lock_; }
 
-        SegmentationTileMap(float resolution, float decay_time) : resolution_(resolution), decay_time_(decay_time) {
-            // 10k observations seemed to be a good estimate of the amount of data to be held for a decay time of ~5s
-            tile_map_.reserve(1e4);
-        }
-        SegmentationTileMap(){}
+  int size() { return static_cast<int>(tile_map_.size()); }
 
-        // Return iterator to the beginning of the tile_map_
-        Iterator begin() { return tile_map_.begin(); }
-        ConstIterator begin() const { return tile_map_.begin(); }
+  TileIndex worldToIndex(double x, double y) const
+  {
+    return TileIndex{
+      static_cast<int>(std::floor(x / resolution_)),
+      static_cast<int>(std::floor(y / resolution_))
+    };
+  }
 
-        // Return iterator to the end of the tile_map_
-        Iterator end() { return tile_map_.end(); }
-        ConstIterator end() const { return tile_map_.end(); }
+  TileWorldXY indexToWorld(int x, int y) const
+  {
+    return TileWorldXY{
+      (static_cast<double>(x) + 0.5) * resolution_,
+      (static_cast<double>(y) + 0.5) * resolution_
+    };
+  }
 
-        /**
-         * @brief Locks the map for exclusive access.
-         */
-        inline void lock() { lock_.lock(); }
+  void pushObservation(TileObservation& obs, TileIndex& idx,
+                       bool dominant_priority = false)
+  {
+    auto it = tile_map_.find(idx);
+    if (it != tile_map_.end()) {
+      it->second.push(obs, dominant_priority);
+    } else {
+      TemporalObservationQueue& queue = tile_map_[idx];
+      queue.setDecayTime(decay_time_);
+      queue.push(obs, dominant_priority);
+    }
+  }
 
-        /**
-         * @brief Unlocks the map.
-         */
-        inline void unlock() { lock_.unlock(); }
-        inline std::recursive_mutex& getMutex() { return lock_; }
+  void purgeOldObservations(double current_time)
+  {
+    std::vector<TileIndex> tiles_to_remove;
+    for (auto& tile : tile_map_) {
+      tile.second.purgeOld(current_time);
+      if (tile.second.empty())
+        tiles_to_remove.emplace_back(tile.first);
+    }
+    for (auto& tile : tiles_to_remove)
+      tile_map_.erase(tile);
+  }
 
-        /**
-         * @brief Returns the number of elements in the map.
-         * @return The size of the map.
-         */
-        int size()
-        {
-            return tile_map_.size();
-        }
-
-        /**
-         * @brief Converts world coordinates to a TileIndex.
-         * @param x X coordinate in world space.
-         * @param y Y coordinate in world space.
-         * @return The corresponding TileIndex.
-         */
-        TileIndex worldToIndex(double x, double y) const {
-            // Convert world coordinates to grid indices
-            int ix = static_cast<int>(std::floor(x / resolution_));
-            int iy = static_cast<int>(std::floor(y / resolution_));
-            return TileIndex{ix, iy};
-        }
-
-        /**
-         * @brief Converts a TileIndex to world coordinates.
-         * @param idx The index to convert.
-         * @return The world coordinates of the tile's center.
-         */
-        TileWorldXY indexToWorld(int x, int y) const {
-            // Calculate the world coordinates of the center of the grid cell
-            double x_world = (static_cast<double>(x) + 0.5) * resolution_;
-            double y_world = (static_cast<double>(y) + 0.5) * resolution_;
-            return TileWorldXY{x_world, y_world};
-        }
-
-        /**
-         * @brief Adds an observation to the specified tile.
-         * @param obs The observation to add.
-         * @param idx The index of the tile.
-         * @param dominant_priority Whether this class should take immediate dominance when observed.
-         */
-        void pushObservation(TileObservation& obs, TileIndex& idx, bool dominant_priority = false)
-        {
-            auto it = tile_map_.find(idx);
-            if (it != tile_map_.end())
-            {
-                // TileIndex exists, push the observation with dominance flag
-                it->second.push(obs, dominant_priority);
-            }
-            else
-            {
-                // TileIndex does not exist, create a new TemporalObservationQueue with decay time
-                TemporalObservationQueue& queue = tile_map_[idx];
-                queue.setDecayTime(decay_time_);
-                queue.push(obs, dominant_priority);
-            }
-        }
-
-        /**
-         * @brief Removes observations older than the decay time from all tiles.
-         * @param current_time The current time for comparison.
-         */
-        void purgeOldObservations(double current_time)
-        {
-            std::vector<TileIndex> tiles_to_remove;
-            for (auto& tile : tile_map_)
-            {
-                tile.second.purgeOld(current_time);
-                if(tile.second.empty())
-                {
-                    tiles_to_remove.emplace_back(tile.first);
-                }
-            }
-            if(tile_map_.size() > 0)
-            for (auto& tile : tiles_to_remove)
-            {
-                tile_map_.erase(tile);
-            }
-        }
+private:
+  std::unordered_map<TileIndex, TemporalObservationQueue> tile_map_;
+  float              resolution_  = 0.0f;
+  float              decay_time_  = 0.0f;
+  std::recursive_mutex lock_;
 };
 
 /**
- * @brief Struct for holding the relevant data of any observation. Includes
- * its position, its confidence, the confidence sum of the tile and the
- * class to which it belongs
+ * @brief POD type used to snapshot per-tile data in updateBounds().
  */
 struct PointData {
-    float x, y, z;
-    float confidence, confidence_sum;
-    uint8_t class_id;
+  float   x, y, z;
+  float   confidence, confidence_sum;
+  uint8_t class_id;
 };
 
-/**
- * @brief Creates a PointCloud2 message that contains a visual representation of 
- * a temporal tile map. There's a "column" of points on each tile, each point represents
- * a segmentation observation over that tile and they are all stacked together. Each observation
- * Has a channel for the class, for the confidence, and the confidence sum of the observations
- * over that tile
- * @param tileMap The segmentation tile map
- */
-inline sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tileMap) {
-    sensor_msgs::msg::PointCloud2 cloud;
-    cloud.header.frame_id = "map";  // Set appropriate frame_id
-    cloud.header.stamp = rclcpp::Clock().now();  // Set current time as timestamp
+inline sensor_msgs::msg::PointCloud2
+visualizeTemporalTileMap(SegmentationTileMap& tileMap)
+{
+  sensor_msgs::msg::PointCloud2 cloud;
+  cloud.header.frame_id = "map";
+  cloud.header.stamp    = rclcpp::Clock().now();
 
-    // Define fields for PointCloud2
-    sensor_msgs::PointCloud2Modifier modifier(cloud);
-    modifier.setPointCloud2Fields(6, "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-                                     "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-                                     "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-                                     "confidence", 1, sensor_msgs::msg::PointField::FLOAT32,
-                                     "confidence_sum", 1, sensor_msgs::msg::PointField::FLOAT32,
-                                     "class", 1, sensor_msgs::msg::PointField::UINT8);
+  sensor_msgs::PointCloud2Modifier modifier(cloud);
+  modifier.setPointCloud2Fields(
+    6,
+    "x",              1, sensor_msgs::msg::PointField::FLOAT32,
+    "y",              1, sensor_msgs::msg::PointField::FLOAT32,
+    "z",              1, sensor_msgs::msg::PointField::FLOAT32,
+    "confidence",     1, sensor_msgs::msg::PointField::FLOAT32,
+    "confidence_sum", 1, sensor_msgs::msg::PointField::FLOAT32,
+    "class",          1, sensor_msgs::msg::PointField::UINT8);
 
-    // Reserve space for points
-    std::vector<PointData> points;
-    for (auto& tile : tileMap) {
-        TileIndex idx = tile.first;
-        TileWorldXY worldXY = tileMap.indexToWorld(idx.x, idx.y);
-        double z = 0.0;
-        for (auto& obs : tile.second.getQueue()) {
-            PointData point;
-            point.x = worldXY.x;
-            point.y = worldXY.y;
-            point.z = z;
-            point.confidence = obs.confidence;
-            point.confidence_sum = tile.second.getConfidenceSum() / tile.second.size();
-            point.class_id = static_cast<uint8_t>(obs.class_id);
-            points.push_back(point);
-            z += 0.02;  // Increment Z by 0.02m for each observation
-        }
+  std::vector<PointData> points;
+  for (auto& tile : tileMap) {
+    TileIndex   idx     = tile.first;
+    TileWorldXY worldXY = tileMap.indexToWorld(idx.x, idx.y);
+    double      z       = 0.0;
+    for (auto& obs : tile.second.getQueue()) {
+      PointData point;
+      point.x              = worldXY.x;
+      point.y              = worldXY.y;
+      point.z              = z;
+      point.confidence     = obs.confidence;
+      point.confidence_sum = (tile.second.size() > 0)
+                               ? tile.second.getConfidenceSum() / tile.second.size()
+                               : 0.0f;
+      point.class_id       = static_cast<uint8_t>(obs.class_id);
+      points.push_back(point);
+      z += 0.02;
     }
+  }
 
-    // Set data in PointCloud2
-    modifier.resize(points.size());  // Number of points
-    sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
-    sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
-    sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
-    sensor_msgs::PointCloud2Iterator<float> iter_confidence(cloud, "confidence");
-    sensor_msgs::PointCloud2Iterator<float> iter_confidence_sum(cloud, "confidence_sum");
-    sensor_msgs::PointCloud2Iterator<uint8_t> iter_class(cloud, "class");
+  modifier.resize(points.size());
+  sensor_msgs::PointCloud2Iterator<float>   iter_x(cloud, "x");
+  sensor_msgs::PointCloud2Iterator<float>   iter_y(cloud, "y");
+  sensor_msgs::PointCloud2Iterator<float>   iter_z(cloud, "z");
+  sensor_msgs::PointCloud2Iterator<float>   iter_conf(cloud, "confidence");
+  sensor_msgs::PointCloud2Iterator<float>   iter_conf_sum(cloud, "confidence_sum");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_class(cloud, "class");
 
-    for (const auto& point : points) {
-        *iter_x = point.x;
-        *iter_y = point.y;
-        *iter_z = point.z;
-        *iter_confidence = point.confidence;
-        *iter_confidence_sum = point.confidence_sum;
-        *iter_class = point.class_id;
-        ++iter_x; ++iter_y; ++iter_z; ++iter_confidence;++iter_confidence_sum; ++iter_class;
-    }
-
-    return cloud;
+  for (const auto& p : points) {
+    *iter_x        = p.x;
+    *iter_y        = p.y;
+    *iter_z        = p.z;
+    *iter_conf     = p.confidence;
+    *iter_conf_sum = p.confidence_sum;
+    *iter_class    = p.class_id;
+    ++iter_x; ++iter_y; ++iter_z; ++iter_conf; ++iter_conf_sum; ++iter_class;
+  }
+  return cloud;
 }
 
 /**
- * Manages segmentation class information, including mapping between class names and IDs,
- * as well as managing the cost heuristic parameters associated with each class.
+ * @brief Maps class names↔IDs and manages CostHeuristicParams per class.
+ *
+ * All public methods are individually thread-safe via an internal mutex.
+ * The shared_ptr to this object must only be replaced while the owning
+ * SegmentationBuffer's recursive_mutex is held (see createSegmentationCostMultimap).
  */
-class SegmentationCostMultimap {
+class SegmentationCostMultimap
+{
 public:
-    using SharedPtr = std::shared_ptr<SegmentationCostMultimap>;
-    SegmentationCostMultimap(){}
-    /**
-     * Constructs the SegmentationCostMultimap.
-     * 
-     * @param nameToIdMap A map from class names to class IDs.
-     * @param nameToCostMap A map from class names to CostHeuristicParams.
-     */
-    SegmentationCostMultimap(const std::unordered_map<std::string, uint8_t>& nameToIdMap,
-                             const std::unordered_map<std::string, CostHeuristicParams>& nameToCostMap) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        name_to_id_ = nameToIdMap;
-        for (const auto& pair : nameToIdMap) {
-            const auto& name = pair.first;
-            uint8_t id = pair.second;
-            auto cost_it = nameToCostMap.find(name);
-            if (cost_it == nameToCostMap.end()) {
-                // This shouldn't happen because we already checked in createSegmentationCostMultimap
-                // but let's be extra safe
-                id_to_cost_[id] = CostHeuristicParams{0, 0, 0, 0, false};
-                continue;
-            }
-            id_to_cost_[id] = cost_it->second;
-        }
-    }
+  using SharedPtr = std::shared_ptr<SegmentationCostMultimap>;
 
-    /**
-     * Updates the cost heuristic parameters associated with a class ID.
-     * 
-     * @param id The class ID.
-     * @param cost The new CostHeuristicParams to associate with the class.
-     */
-    void updateCostById(uint8_t id, const CostHeuristicParams& cost) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        id_to_cost_[id] = cost;
-    }
+  SegmentationCostMultimap() {}
 
-    /**
-     * Retrieves the cost heuristic parameters associated with a class ID.
-     * 
-     * @param id The class ID.
-     * @return The CostHeuristicParams associated with the class.
-     */
-    CostHeuristicParams getCostById(uint8_t id) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        auto it = id_to_cost_.find(id);
-        if (it == id_to_cost_.end()) {
-            return CostHeuristicParams{0, 0, 0, 0, false};
-        }
-        return it->second;
+  SegmentationCostMultimap(
+    const std::unordered_map<std::string, uint8_t>&             nameToIdMap,
+    const std::unordered_map<std::string, CostHeuristicParams>& nameToCostMap)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    name_to_id_ = nameToIdMap;
+    for (const auto& pair : nameToIdMap) {
+      uint8_t    id      = pair.second;
+      auto       cost_it = nameToCostMap.find(pair.first);
+      id_to_cost_[id]    = (cost_it != nameToCostMap.end())
+                             ? cost_it->second
+                             : CostHeuristicParams{0, 0, 0, 0, false};
     }
+  }
 
-    /**
-     * Checks if a class ID exists in the cost mapping.
-     * 
-     * @param id The class ID to check.
-     * @return true if the class ID exists, false otherwise.
-     */
-    bool hasClassId(uint8_t id) const {
-        // No lock needed - only reading, no concurrent modifications
-        return id_to_cost_.find(id) != id_to_cost_.end();
-    }
+  void updateCostById(uint8_t id, const CostHeuristicParams& cost)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    id_to_cost_[id] = cost;
+  }
 
-    /**
-     * Updates the cost heuristic parameters associated with a class name.
-     * 
-     * @param name The class name.
-     * @param cost The new CostHeuristicParams to associate with the class.
-     */
-    void updateCostByName(const std::string& name, const CostHeuristicParams& cost) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        uint8_t id = name_to_id_.at(name);
-        id_to_cost_[id] = cost;
-    }
+  CostHeuristicParams getCostById(uint8_t id) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = id_to_cost_.find(id);
+    return (it != id_to_cost_.end()) ? it->second
+                                     : CostHeuristicParams{0, 0, 0, 0, false};
+  }
 
-    /**
-     * Retrieves the cost heuristic parameters associated with a class name.
-     * 
-     * @param name The class name.
-     * @return The CostHeuristicParams associated with the class.
-     */
-    CostHeuristicParams getCostByName(const std::string& name) const {
-        std::lock_guard<std::mutex> lock(mutex_);
-        uint8_t id = name_to_id_.at(name);
-        return id_to_cost_.at(id);
-    }
+  // FIX: mutex_ now held — comment previously claimed no lock was needed,
+  // which was incorrect given concurrent writes via updateCostById().
+  bool hasClassId(uint8_t id) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return id_to_cost_.find(id) != id_to_cost_.end();
+  }
 
-    bool empty() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return name_to_id_.empty() || id_to_cost_.empty();
-    }
+  void updateCostByName(const std::string& name, const CostHeuristicParams& cost)
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = name_to_id_.find(name);
+    if (it != name_to_id_.end())
+      id_to_cost_[it->second] = cost;
+  }
+
+  CostHeuristicParams getCostByName(const std::string& name) const
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto nit = name_to_id_.find(name);
+    if (nit == name_to_id_.end())
+      return CostHeuristicParams{0, 0, 0, 0, false};
+    auto cit = id_to_cost_.find(nit->second);
+    return (cit != id_to_cost_.end()) ? cit->second
+                                      : CostHeuristicParams{0, 0, 0, 0, false};
+  }
+
+  bool empty()
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return name_to_id_.empty() || id_to_cost_.empty();
+  }
 
 private:
-    mutable std::mutex mutex_;  // mutable allows locking in const methods
-    std::unordered_map<std::string, uint8_t> name_to_id_;
-    std::unordered_map<uint8_t, CostHeuristicParams> id_to_cost_;
+  mutable std::mutex                               mutex_;
+  std::unordered_map<std::string, uint8_t>         name_to_id_;
+  std::unordered_map<uint8_t, CostHeuristicParams> id_to_cost_;
 };
 
 namespace nav2_costmap_2d {
+
 /**
  * @class SegmentationBuffer
- * @brief Takes in point clouds from sensors, transforms them to the desired frame, and stores them
+ * @brief Transforms point clouds to the global frame and buffers semantic
+ *        segmentation observations in a SegmentationTileMap.
+ *
+ * Thread-safety contract:
+ *   All methods that read or write segmentation_cost_multimap_ or
+ *   temporal_tile_map_ must be called while holding lock_ (getMutex()).
+ *   The only exception is isCurrent() which only reads clock state.
  */
 class SegmentationBuffer
 {
-   public:
-    using SharedPtr = std::shared_ptr<SegmentationBuffer>;
-    /**
-     * @brief  Constructs an segmentation buffer
-     * @param  topic_name The topic of the segmentations, used as an identifier for error and warning
-     * messages
-     * @param  observation_keep_time Defines the persistence of segmentations in seconds, 0 means only
-     * keep the latest
-     * @param  expected_update_rate How often this buffer is expected to be updated, 0 means there is
-     * no limit
-     * @param  min_obstacle_height The minimum height of a hitpoint to be considered legal
-     * @param  max_obstacle_height The minimum height of a hitpoint to be considered legal
-     * @param  obstacle_max_range The range to which the sensor should be trusted for inserting
-     * obstacles
-     * @param  obstacle_min_range The range from which the sensor should be trusted for inserting
-     * obstacles
-     * @param  raytrace_max_range The range to which the sensor should be trusted for raytracing to
-     * clear out space
-     * @param  raytrace_min_range The range from which the sensor should be trusted for raytracing to
-     * clear out space
-     * @param  tf2_buffer A reference to a tf2 Buffer
-     * @param  global_frame The frame to transform PointClouds into
-     * @param  sensor_frame The frame of the origin of the sensor, can be left blank to be read from
-     * the messages
-     * @param  tf_tolerance The amount of time to wait for a transform to be available when setting a
-     * new global frame
-     */
-    SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string buffer_source,
-                       std::vector<std::string> class_types,
-                       std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map,
-                       std::unordered_map<std::string, std::vector<std::string>> class_type_to_names,
-                       double observation_keep_time,
-                       double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
-                       tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
-                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map = false,
-                       bool use_cost_selection = true);
+public:
+  using SharedPtr = std::shared_ptr<SegmentationBuffer>;
 
-    /**
-     * @brief  Destructor... cleans up
-     */
-    ~SegmentationBuffer();
+  SegmentationBuffer(
+    const nav2_util::LifecycleNode::WeakPtr&                      parent,
+    std::string                                                    buffer_source,
+    std::vector<std::string>                                       class_types,
+    std::unordered_map<std::string, CostHeuristicParams>           class_names_cost_map,
+    std::unordered_map<std::string, std::vector<std::string>>      class_type_to_names,
+    double observation_keep_time,
+    double expected_update_rate,
+    double max_lookahead_distance,
+    double min_lookahead_distance,
+    tf2_ros::Buffer&   tf2_buffer,
+    std::string        global_frame,
+    std::string        sensor_frame,
+    tf2::Duration      tf_tolerance,
+    double             costmap_resolution,
+    double             tile_map_decay_time,
+    bool               visualize_tile_map = false,
+    bool               use_cost_selection = true);
 
-    /**
-     * @brief  Transforms a PointCloud to the global frame and buffers it
-     * This function processes semantic segmentation data and stores observations in tiles.
-     * When multiple observations exist for the same tile, the observation with the highest
-     * max_cost is selected. This ensures that dangerous areas (high max_cost) are prioritized
-     * over safe areas (low max_cost) for navigation safety.
-     * <b>Note: The burden is on the user to make sure the transform is available... ie they should
-     * use a MessageNotifier</b>
-     * @param  cloud The cloud to be buffered
-     * @param  segmentation The semantic segmentation image containing class IDs
-     * @param  confidence The confidence image containing confidence values for each pixel
-     */
-    void bufferSegmentation(const sensor_msgs::msg::PointCloud2& cloud, const sensor_msgs::msg::Image& segmentation,
-                            const sensor_msgs::msg::Image& confidence);
+  ~SegmentationBuffer();
 
-    /**
-     * @brief  gets the class map associated with the segmentations stored in the buffer
-     * @return the class map
-     */
-    std::unordered_map<std::string, CostHeuristicParams> getClassMap();
+  /**
+   * @brief Transform cloud to global frame and store observations.
+   *        MUST be called while holding getMutex().
+   */
+  void bufferSegmentation(const sensor_msgs::msg::PointCloud2& cloud,
+                          const sensor_msgs::msg::Image&        segmentation,
+                          const sensor_msgs::msg::Image&        confidence);
 
-    void createSegmentationCostMultimap(const vision_msgs::msg::LabelInfo& label_info);
+  std::unordered_map<std::string, CostHeuristicParams> getClassMap();
 
-    bool isClassIdCostMapEmpty() { return segmentation_cost_multimap_->empty(); }
+  /**
+   * @brief Rebuild the cost multimap from a LabelInfo message.
+   *        MUST be called while holding getMutex().
+   */
+  void createSegmentationCostMultimap(const vision_msgs::msg::LabelInfo& label_info);
 
-    /**
-     * @brief  Check if the segmentation buffer is being update at its expected rate
-     * @return True if it is being updated at the expected rate, false otherwise
-     */
-    bool isCurrent() const;
+  /**
+   * @brief Returns true if no LabelInfo has been received yet.
+   *        MUST be called while holding getMutex().
+   */
+  bool isClassIdCostMapEmpty() { return segmentation_cost_multimap_->empty(); }
 
-    /**
-     * @brief  Lock the segmentation buffer
-     */
-    inline void lock() { lock_.lock(); }
+  bool isCurrent() const;
 
-    /**
-     * @brief  Lock the segmentation buffer
-     */
-    inline void unlock() { lock_.unlock(); }
-    inline std::recursive_mutex& getMutex() { return lock_; }
+  inline void lock()   { lock_.lock(); }
+  inline void unlock() { lock_.unlock(); }
+  inline std::recursive_mutex& getMutex() { return lock_; }
 
-    /**
-     * @brief Reset last updated timestamp
-     */
-    void resetLastUpdated();
+  void resetLastUpdated();
 
-    /**
-     * @brief Reset last updated timestamp
-     */
-    std::string getBufferSource() { return buffer_source_; }
-    std::vector<std::string> getClassTypes() { return class_types_; }
-    
-    /**
-     * @brief Get class names for a specific class type
-     * @param class_type The class type to get names for
-     * @return Vector of class names for the given type
-     */
-    std::vector<std::string> getClassNamesForType(const std::string& class_type);
+  std::string              getBufferSource()  { return buffer_source_; }
+  std::vector<std::string> getClassTypes()    { return class_types_; }
+  std::vector<std::string> getClassNamesForType(const std::string& class_type);
 
-    void setMinObstacleDistance(double distance) { sq_min_lookahead_distance_ = pow(distance, 2); }
+  void setMinObstacleDistance(double distance)
+  { sq_min_lookahead_distance_ = std::pow(distance, 2); }
 
-    void setMaxObstacleDistance(double distance) { sq_max_lookahead_distance_ = pow(distance, 2); }
+  void setMaxObstacleDistance(double distance)
+  { sq_max_lookahead_distance_ = std::pow(distance, 2); }
 
-    void updateClassMap(std::string new_class, CostHeuristicParams new_cost);
+  /**
+   * @brief Update cost params for a named class.
+   *        MUST be called while holding getMutex().
+   */
+  void updateClassMap(std::string new_class, CostHeuristicParams new_cost);
 
-    SegmentationTileMap::SharedPtr getSegmentationTileMap()
-    {
-        return temporal_tile_map_;
-    }
+  SegmentationTileMap::SharedPtr getSegmentationTileMap()
+  { return temporal_tile_map_; }
 
-    CostHeuristicParams getCostForClassId(uint8_t class_id)
-    {
-        return segmentation_cost_multimap_->getCostById(class_id);
-    }
+  /**
+   * @brief Retrieve cost params by class ID.
+   *        MUST be called while holding getMutex().
+   */
+  CostHeuristicParams getCostForClassId(uint8_t class_id)
+  { return segmentation_cost_multimap_->getCostById(class_id); }
 
-    CostHeuristicParams getCostForClassName(std::string class_name)
-    {
-        return segmentation_cost_multimap_->getCostByName(class_name);
-    }
+  /**
+   * @brief Retrieve cost params by class name.
+   *        MUST be called while holding getMutex().
+   */
+  CostHeuristicParams getCostForClassName(std::string class_name)
+  { return segmentation_cost_multimap_->getCostByName(class_name); }
 
-   private:
-    /**
-     * @brief  Removes any stale segmentations from the buffer list
-     */
-    void purgeStaleSegmentations();
+private:
+  void purgeStaleSegmentations();
 
-    rclcpp::Clock::SharedPtr clock_;
-    rclcpp::Logger logger_{rclcpp::get_logger("nav2_costmap_2d")};
-    tf2_ros::Buffer& tf2_buffer_;
-    std::vector<std::string> class_types_;
-    std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map_;
-    std::unordered_map<std::string, std::vector<std::string>> class_type_to_names_;
-    const rclcpp::Duration observation_keep_time_;
-    const rclcpp::Duration expected_update_rate_;
-    rclcpp::Time last_updated_;
-    std::string global_frame_;
-    std::string sensor_frame_;
-    std::string buffer_source_;
-    std::recursive_mutex lock_;  ///< @brief A lock for accessing data in callbacks safely
-    double sq_max_lookahead_distance_;
-    double sq_min_lookahead_distance_;
-    tf2::Duration tf_tolerance_;
-    
-    SegmentationCostMultimap::SharedPtr segmentation_cost_multimap_;
+  rclcpp::Clock::SharedPtr  clock_;
+  rclcpp::Logger            logger_{rclcpp::get_logger("nav2_costmap_2d")};
+  tf2_ros::Buffer&          tf2_buffer_;
+  std::vector<std::string>  class_types_;
+  std::unordered_map<std::string, CostHeuristicParams>          class_names_cost_map_;
+  std::unordered_map<std::string, std::vector<std::string>>     class_type_to_names_;
+  const rclcpp::Duration    observation_keep_time_;
+  const rclcpp::Duration    expected_update_rate_;
+  rclcpp::Time              last_updated_;
+  std::string               global_frame_;
+  std::string               sensor_frame_;
+  std::string               buffer_source_;
+  std::recursive_mutex      lock_;
+  double                    sq_max_lookahead_distance_;
+  double                    sq_min_lookahead_distance_;
+  tf2::Duration             tf_tolerance_;
 
-    SegmentationTileMap::SharedPtr temporal_tile_map_;
+  SegmentationCostMultimap::SharedPtr segmentation_cost_multimap_;
+  SegmentationTileMap::SharedPtr      temporal_tile_map_;
 
-    bool visualize_tile_map_;
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr tile_map_pub_;
-    // If true, select observation per tile using highest max_cost. If false, use highest confidence
-    bool use_cost_selection_ = true;
+  bool visualize_tile_map_ = false;
+  bool use_cost_selection_ = true;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr tile_map_pub_;
 };
+
 }  // namespace nav2_costmap_2d
 #endif  // SEMANTIC_SEGMENTATION_LAYER__SEGMENTATION_BUFFER_HPP_
-
