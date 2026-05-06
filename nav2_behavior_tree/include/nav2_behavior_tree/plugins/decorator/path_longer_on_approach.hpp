@@ -18,100 +18,78 @@
 #include <string>
 #include <memory>
 #include <limits>
+#include <cmath>
 
-#include "geometry_msgs/msg/pose_stamped.hpp"
-#include "nav_msgs/msg/path.hpp"
 #include "behaviortree_cpp_v3/decorator_node.h"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/point.hpp"
+#include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace nav2_behavior_tree
 {
 
-/**
- * @brief A BT::DecoratorNode that ticks its child everytime when the length of
- * the new path is smaller than the old one by the length given by the user.
- */
 class PathLongerOnApproach : public BT::DecoratorNode
 {
 public:
-  /**
-   * @brief A constructor for nav2_behavior_tree::PathLongerOnApproach
-   * @param name Name for the XML tag for this node
-   * @param conf BT node configuration
-   */
   PathLongerOnApproach(
     const std::string & name,
     const BT::NodeConfiguration & conf);
 
-  /**
-   * @brief Creates list of BT ports
-   * @return BT::PortsList Containing node-specific ports
-   */
   static BT::PortsList providedPorts()
   {
     return {
       BT::InputPort<nav_msgs::msg::Path>("path", "Planned Path"),
+      BT::InputPort<geometry_msgs::msg::PoseStamped>(
+        "goal", "Navigation goal (used for goal-change detection)"),
       BT::InputPort<double>(
-        "prox_len", 3.0,
-        "Proximity length (m) for the path to be longer on approach"),
+        "prox_len", 20.0,
+        "Proximity length (m) within which path length growth is monitored"),
       BT::InputPort<double>(
-        "length_factor", 2.0,
-        "Length multiplication factor to check if the path is significantly longer"),
+        "length_factor", 1.1,
+        "Relative factor: effective_total must exceed length_factor * snapshot_total"),
       BT::InputPort<double>(
-        "abs_length", 2.0,
-        "Absolute length (m) the new path must exceed the old path by"),
+        "abs_length", 0.5,
+        "Absolute floor (m): effective_total - snapshot_total must also exceed this"),
     };
   }
 
-  /**
-   * @brief The main override required by a BT action
-   * @return BT::NodeStatus Status of tick execution
-   */
   BT::NodeStatus tick() override;
 
 private:
-  /**
-   * @brief Checks if the global path is updated
-   * @param new_path new path to the goal
-   * @param old_path current path to the goal
-   * @return whether the path is updated for the current goal
-   */
-  bool isPathUpdated(
-    nav_msgs::msg::Path & new_path,
-    nav_msgs::msg::Path & old_path);
-
-  /**
-   * @brief Checks if the robot is in the goal proximity
-   * @param old_path current path to the goal
-   * @param prox_leng proximity length from the goal
-   * @return whether the robot is in the goal proximity
-   */
   bool isRobotInGoalProximity(
-    nav_msgs::msg::Path & old_path,
-    double & prox_leng);
+    nav_msgs::msg::Path & path,
+    double & prox_len);
 
-  /**
-   * @brief Checks if the new path is longer
-   * @param new_path new path to the goal
-   * @param old_path current path to the goal
-   * @param length_factor multipler for path length check
-   * @param abs_length absolute length for path length check
-   * @return whether the new path is longer
-   */
-  bool isNewPathLonger(
-    nav_msgs::msg::Path & new_path,
-    nav_msgs::msg::Path & old_path,
-    double & length_factor,
-    double & abs_length);
+  nav_msgs::msg::Path current_path_;
+  geometry_msgs::msg::PoseStamped current_goal_;
+  geometry_msgs::msg::Point last_goal_position_;
 
-private:
-  nav_msgs::msg::Path new_path_;
-  nav_msgs::msg::Path old_path_;
-  double prox_len_ = std::numeric_limits<double>::max();
+  double prox_len_      = std::numeric_limits<double>::max();
   double length_factor_ = std::numeric_limits<double>::max();
-  double abs_length_ = std::numeric_limits<double>::max();
+  double abs_length_    = 0.0;
+
+  /// Total path length at snapshot time.
+  double snapshot_total_length_ = 0.0;
+
+  /// Remaining path length on the previous tick.
+  /// Used to compute the incremental step the robot moved each tick.
+  double prev_remaining_ = 0.0;
+
+  /// Accumulated distance the robot has moved since snapshot was taken.
+  /// Grows each tick by max(0, prev_remaining - current_remaining).
+  double distance_moved_ = 0.0;
+
+  double current_remaining = 0.0;
+  double effective_total = 0.0;
+  double delta = 0.0;
   rclcpp::Node::SharedPtr node_;
-  bool first_time_ = true;
+
+  bool first_time_      = true;
+  bool snapshot_taken_  = false;
+  bool child_triggered_ = false;
+
+  static constexpr double kGoalPositionTolerance = 0.05;
 };
 
 }  // namespace nav2_behavior_tree

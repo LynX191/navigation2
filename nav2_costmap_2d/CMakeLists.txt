@@ -93,6 +93,7 @@ add_library(layers SHARED
   plugins/denoise_layer.cpp
   plugins/semantic_segmentation_layer.cpp
   plugins/segmentation_buffer.cpp
+  plugins/plugin_container_layer.cpp
 )
 add_library(${PROJECT_NAME}::layers ALIAS layers)
 ament_target_dependencies(layers
