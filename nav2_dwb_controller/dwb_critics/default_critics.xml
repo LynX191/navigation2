@@ -38,5 +38,11 @@
       <description>Penalize trajectories with rotational velocities
       </description>
     </class>
+    <class type="dwb_critics::FOVCritic" base_class_type="dwb_core::TrajectoryCritic">
+      <description>
+        Rejects trajectories whose motion direction (in robot frame at each
+        simulated pose) falls outside the union of configured camera FOV sectors.
+      </description>
+    </class>
   </library>
 </class_libraries>
